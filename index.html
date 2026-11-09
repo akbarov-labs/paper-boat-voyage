@@ -1,0 +1,916 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="A scroll-driven Three.js story: a paper boat travels from a mountain spring to the sea as you scroll.">
+<style>
+:root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+body { margin: 0; }
+img { max-width: 100%; }
+[hidden] { display: none !important; }
+</style>
+<title>Paper Boat Voyage</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;700&family=JetBrains+Mono:wght@400;600&family=Young+Serif&display=swap">
+<style>
+/* Layout concept: one pinned 3D stage with HUD cards on it, then a plain explainer that shows the code behind it. */
+:root {
+  --bg: #EEF3F5; --fg: #16233F; --muted: #4F5D78; --line: #CBD5DE; --accent: #0D6F7C;
+  --code-bg: #16233F; --code-fg: #E6ECF5; --code-note: #9FB2CC;
+  /* The stage sits on the 3D scene, so its colors stay the same in both themes. */
+  --ink: #111B33; --ink-soft: #24314F; --paper: #FBFAF4; --paper-ink: #16233F; --paper-muted: #4F5D78;
+  --marigold: #F4AE27; --sky-teal: #6FD3DE; --on-ink: #F4F6FB; --on-ink-muted: #AEBBD3;
+  --scrim-strong: rgba(9, 14, 30, .9); --scrim-mid: rgba(9, 14, 30, .58); --scrim-none: rgba(9, 14, 30, 0);
+  --font-display: "Young Serif", Georgia, "Times New Roman", serif;
+  --font-body: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  --gutter-l: max(16px, env(safe-area-inset-left, 0px));
+  --gutter-r: max(16px, env(safe-area-inset-right, 0px));
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0D1426; --fg: #E7ECF6; --muted: #9AA8C2; --line: #2A3754; --accent: #58C8D4;
+    --code-bg: #060B18; --code-fg: #E6ECF5; --code-note: #8496B3; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0D1426; --fg: #E7ECF6; --muted: #9AA8C2; --line: #2A3754; --accent: #58C8D4;
+  --code-bg: #060B18; --code-fg: #E6ECF5; --code-note: #8496B3; color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: auto; }
+body { background: var(--bg); color: var(--fg); font: 400 16px/1.55 var(--font-body); }
+h1, h2, h3 { font-family: var(--font-display); font-weight: 400; text-wrap: balance; margin: 0; }
+p { margin: 0; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--marigold); outline-offset: 2px; }
+
+/* The pin: a tall section gives scroll distance and a sticky stage stays on screen. */
+.story { position: relative; background: var(--ink); }
+.stage { position: relative; overflow: hidden; background: var(--ink); color: var(--on-ink); }
+.scene { position: absolute; inset: 0; display: block; width: 100%; height: 100%; visibility: hidden; }
+.story.is-ready { height: 800vh; height: 800svh; }
+.story.is-ready .stage { position: sticky; top: 0; height: 100vh; height: 100svh; }
+.story.is-ready .scene { visibility: visible; }
+
+.intro { display: flex; align-items: center; padding-block: 72px 48px; padding-left: var(--gutter-l); padding-right: var(--gutter-r);
+  background: linear-gradient(90deg, var(--scrim-strong), var(--scrim-mid) 48%, var(--scrim-none) 78%); }
+.story.is-ready .intro { position: absolute; inset: 0; }
+.intro__inner { display: flex; flex-direction: column; align-items: flex-start; gap: 18px; max-width: 34rem; margin-left: clamp(0px, 5vw, 72px); }
+.eyebrow { font: 600 12px/1.3 var(--font-mono); letter-spacing: .06em; color: var(--marigold); }
+.intro h1 { font-size: clamp(2.3rem, 5.4vw, 4.4rem); line-height: 1.06; }
+.lead { font-size: 1.06rem; color: var(--on-ink); max-width: 30rem; }
+.cue { font: 600 13px/1.4 var(--font-mono); color: var(--on-ink); }
+.force { padding: 10px 16px; border-radius: 8px; background: var(--marigold); color: var(--ink); font-weight: 700; }
+
+.chapters-static { padding-block: 8px 56px; padding-left: var(--gutter-l); padding-right: var(--gutter-r); }
+.chapters-static ol { display: grid; gap: 18px; max-width: 40rem; margin: 0 auto; padding: 0; list-style: none; }
+.chapters-static h3 { font-size: 1.2rem; }
+.chapters-static p { color: var(--on-ink-muted); }
+.story.is-ready .chapters-static { display: none; }
+
+/* HUD */
+.hud { display: none; }
+.story.is-ready .hud { display: block; position: absolute; inset: 0; pointer-events: none; }
+.log { position: absolute; pointer-events: auto; top: calc(16px + env(safe-area-inset-top, 0px)); left: var(--gutter-l); width: 18.5rem; max-width: calc(100% - var(--gutter-l) - var(--gutter-r));
+  background: var(--ink); color: var(--on-ink); padding: 14px 16px; border-radius: 6px; }
+.log__top { display: flex; justify-content: space-between; gap: 16px; }
+.log small { display: block; font-size: 12px; color: var(--on-ink-muted); }
+.log strong { font: 400 1.5rem/1.15 var(--font-display); font-variant-numeric: tabular-nums; }
+.log__km { text-align: right; }
+.hood { margin-top: 10px; border-top: 1px solid var(--ink-soft); padding-top: 8px; }
+.hood summary { cursor: pointer; font: 600 12px/1.6 var(--font-mono); color: var(--marigold); }
+.hood dl { display: grid; grid-template-columns: 1fr auto; gap: 3px 12px; margin: 8px 0 0; font: 400 12px/1.5 var(--font-mono); }
+.hood dt { color: var(--on-ink-muted); }
+.hood dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.lag { position: relative; height: 18px; margin-top: 10px; border-bottom: 1px solid var(--on-ink-muted); }
+.lag i { position: absolute; bottom: -1px; width: 3px; margin-left: -1px; }
+.lag .lag__raw { height: 16px; background: var(--sky-teal); }
+.lag .lag__eased { height: 10px; background: var(--marigold); width: 5px; margin-left: -2px; }
+.lag-key { display: flex; justify-content: space-between; margin-top: 5px; font: 400 11px/1.4 var(--font-mono); }
+.lag-key span:first-child { color: var(--sky-teal); }
+.lag-key span:last-child { color: var(--marigold); }
+
+.caption { position: absolute; pointer-events: auto; right: var(--gutter-r); bottom: calc(84px + env(safe-area-inset-bottom, 0px)); width: min(25rem, calc(100% - var(--gutter-l) - var(--gutter-r)));
+  background: var(--paper); color: var(--paper-ink); padding: 18px 26px 16px 20px;
+  clip-path: polygon(0 0, calc(100% - 20px) 0, 100% 20px, 100% 100%, 0 100%); }
+.caption__n { font: 600 12px/1.3 var(--font-mono); color: var(--paper-muted); }
+.caption h2 { font-size: 1.5rem; line-height: 1.2; margin: 6px 0; }
+.caption p { font-size: .95rem; line-height: 1.45; color: var(--paper-muted); }
+.caption a { display: inline-block; margin-top: 8px; padding-block: 4px; font-size: 13px; font-weight: 700; color: var(--paper-ink); }
+
+.rail { position: absolute; pointer-events: auto; left: var(--gutter-l); right: var(--gutter-r); bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  display: flex; gap: 8px; max-width: 54rem; margin-inline: auto; padding: 8px 12px; background: var(--ink); border-radius: 6px; }
+.rail button { flex: 1 1 0; min-width: 0; min-height: 44px; display: flex; flex-direction: column; justify-content: center; gap: 6px; text-align: left; color: var(--on-ink-muted); }
+.rail button[aria-current="step"] { color: var(--on-ink); }
+.rail__bar { display: block; height: 3px; background: var(--ink-soft); overflow: hidden; }
+.rail__bar span { display: block; height: 100%; background: var(--marigold); transform-origin: left; transform: scaleX(0); }
+.rail__label { font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rail__num { display: none; font: 600 12px var(--font-mono); }
+
+@media (max-width: 700px) {
+  .intro { background: var(--scrim-mid); }
+  .intro__inner { margin-left: 0; }
+  .log { padding: 10px 14px; }
+  .log strong { font-size: 1.2rem; }
+  .hood { margin-top: 6px; padding-top: 4px; }
+  .rail__label { display: none; }
+  .rail__num { display: block; }
+  .caption { padding: 14px 24px 10px 16px; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
+  .caption h2 { font-size: 1.25rem; margin: 3px 0; }
+  .caption p { font-size: .88rem; }
+}
+
+/* Explainer */
+.notes { padding-block: clamp(56px, 8vw, 104px); padding-left: var(--gutter-l); padding-right: var(--gutter-r); scroll-margin-top: 0; }
+.notes__in { display: grid; gap: clamp(36px, 5vw, 60px); max-width: 66rem; margin: 0 auto; }
+.notes__head { display: grid; gap: 14px; max-width: 42rem; }
+.notes h2 { font-size: clamp(1.9rem, 3.6vw, 2.8rem); line-height: 1.12; }
+.notes__head p { color: var(--muted); font-size: 1.06rem; }
+.layer { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 16px 40px; padding-top: 24px; border-top: 1px solid var(--line); }
+.layer > div { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.layer__tag { font: 600 12px/1.3 var(--font-mono); color: var(--accent); }
+.layer h3 { font-size: 1.45rem; line-height: 1.2; }
+.layer p, .tryit li { color: var(--muted); }
+code { font-family: var(--font-mono); font-size: .9em; }
+pre { margin: 0; padding: 16px 18px; min-width: 0; overflow-x: auto; background: var(--code-bg); color: var(--code-fg); border-radius: 6px; font: 400 13px/1.6 var(--font-mono); }
+pre em { font-style: normal; color: var(--code-note); }
+.split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 40px; padding-top: 24px; border-top: 1px solid var(--line); }
+.split > div { display: grid; gap: 10px; align-content: start; min-width: 0; }
+.split h3 { font-size: 1.45rem; }
+.tryit { display: grid; gap: 8px; margin: 0; padding-left: 1.2em; }
+.credit { font-size: 14px; color: var(--muted); }
+@media (max-width: 760px) { .layer, .split { grid-template-columns: minmax(0, 1fr); } }
+</style>
+</head>
+<body>
+<section id="story" class="story" aria-label="Paper boat voyage, a 3D story driven by scrolling">
+  <div class="stage" id="stage">
+    <canvas class="scene" id="scene" aria-hidden="true"></canvas>
+    <div class="intro" id="intro">
+      <div class="intro__inner">
+        <p class="eyebrow">Scroll-scrubbed 3D demo</p>
+        <h1>A paper boat, steered by your scrollbar.</h1>
+        <p class="lead">Scroll to carry it 38 km from a mountain spring to the sea. Every frame is computed from one number, so you can stop, reverse or jump anywhere.</p>
+        <p class="cue" id="cue" role="status">Loading the 3D scene…</p>
+        <button class="force" id="force" type="button" hidden>Load the 3D scene anyway</button>
+      </div>
+    </div>
+    <div class="hud" id="hud">
+      <aside class="log" aria-label="Voyage log and live values">
+        <div class="log__top">
+          <div><small id="day">Day 1</small><strong id="clock">06:30</strong></div>
+          <div class="log__km"><small>From the spring</small><strong id="km">0.0 km</strong></div>
+        </div>
+        <details class="hood" id="hood">
+          <summary>Under the hood</summary>
+          <dl>
+            <dt>scroll progress</dt><dd id="g-progress">0.0%</dd>
+            <dt>target time</dt><dd id="g-target">0.00</dd>
+            <dt>eased time</dt><dd id="g-time">0.00</dd>
+            <dt>camera keyframes</dt><dd id="g-key">0 → 1</dd>
+            <dt>night amount</dt><dd id="g-night">0.00</dd>
+          </dl>
+          <div class="lag" aria-hidden="true"><i class="lag__raw" id="lag-raw"></i><i class="lag__eased" id="lag-eased"></i></div>
+          <div class="lag-key"><span>raw scroll</span><span>eased</span></div>
+        </details>
+      </aside>
+      <div class="caption" aria-live="polite">
+        <span class="caption__n" id="cap-n">1 of 6</span>
+        <h2 id="cap-title">The spring</h2>
+        <p id="cap-text"></p>
+        <a href="#how">Skip to how it's built ↓</a>
+      </div>
+      <nav class="rail" id="rail" aria-label="Jump to a chapter"></nav>
+    </div>
+    <div class="chapters-static" id="static-list">
+      <ol id="static-chapters"></ol>
+    </div>
+  </div>
+</section>
+
+<section class="notes" id="how">
+  <div class="notes__in">
+    <div class="notes__head">
+      <h2>How this page is wired</h2>
+      <p>The effect has four layers. None of them needs an animation library. Three.js only draws the frame.</p>
+    </div>
+
+    <article class="layer">
+      <div><span class="layer__tag">Layer 1: CSS</span><h3>Pin the stage</h3><p>The section is 8 screens tall and holds a stage that sticks to the top. The extra height is what you are scrolling through, while the canvas stays still on screen.</p></div>
+      <pre>.story { height: 800svh; }
+.stage { position: sticky; top: 0; height: 100svh; }</pre>
+    </article>
+
+    <article class="layer">
+      <div><span class="layer__tag">Layer 2: JavaScript</span><h3>Turn scroll into eased time</h3><p>Scroll position sets a target between 0 and 40. The displayed time chases that target every frame, which gives the motion its weight. Watch the two markers in the "Under the hood" panel separate when you scroll fast.</p></div>
+      <pre>const r = story.getBoundingClientRect();
+const progress = clamp(-r.top / (r.height - stage.clientHeight));
+const target = progress * 40;
+
+<em>// Frame-rate independent easing</em>
+time += (target - time) * (1 - Math.exp(-dt * 5));</pre>
+    </article>
+
+    <article class="layer">
+      <div><span class="layer__tag">Layer 3: The world</span><h3>Compute the whole frame from t</h3><p>Nothing in the scene stores progress or plays on a clock. The boat, sky, camera and mill wheel are all read from tables using <code>t</code>, which is why scrolling backwards runs the story in reverse without extra code.</p></div>
+      <pre><em>// [time, distance, elevation, azimuth]</em>
+const CAMERA = [[0, 110, 24, 60], [6, 24, 16, -70], …];
+<em>// [startTime, endTime, startPos, endPos] along the river</em>
+const MOVES  = [[1.5, 10.5, 0, .25], [12, 16.5, .25, .42], …];
+<em>// [time, top, horizon, sun, sunPower, fill, elevation, azimuth, night]</em>
+const SKY    = [[0, "#A8D8EA", "#EAF4E8", …], …];
+
+function render(t) {
+  boat.position.copy(riverAt(boatPosition(t)));
+  trail.geometry.setDrawRange(0, trailCount(t));
+  wheel.rotation.z = -t * 1.3;
+  windows.emissiveIntensity = skyAt(t).night * 1.7;
+  placeCamera(cameraAt(t));
+  renderer.render(scene, camera);
+}</pre>
+    </article>
+
+    <article class="layer">
+      <div><span class="layer__tag">Layer 4: HTML</span><h3>Read the same t in the interface</h3><p>The clock, distance, caption and chapter bars are ordinary HTML on top of the canvas. They use the same number, so they cannot drift out of step with the 3D scene.</p></div>
+      <pre>const chapter = lastIndexWhere(CHAPTERS, c =&gt; t &gt;= c.start);
+captionTitle.textContent = CHAPTERS[chapter].title;
+clock.textContent = formatClock(lookup(CLOCK, t));
+bars[chapter].style.transform = `scaleX(${chapterProgress})`;</pre>
+    </article>
+
+    <div class="split">
+      <div>
+        <h3>Three things to try</h3>
+        <ol class="tryit">
+          <li>Stop on the mill wheel in chapter 3. It stops too, because it only moves with <code>t</code>.</li>
+          <li>Flick the scrollbar a long way and watch the eased marker catch up with the raw one.</li>
+          <li>Scroll back and forth across dusk in chapter 4. The windows and lamps turn on and off in step.</li>
+        </ol>
+      </div>
+      <div>
+        <h3>Guards this page also uses</h3>
+        <ol class="tryit">
+          <li>Three.js loads only after the page is idle, and the page is complete without it.</li>
+          <li>Drawing stops off screen, in a hidden tab, and whenever <code>t</code> has not changed.</li>
+          <li>Small screens and low-core devices get fewer triangles and a lower pixel ratio.</li>
+          <li>Reduced-motion settings and WebGL failures fall back to a readable chapter list.</li>
+        </ol>
+      </div>
+    </div>
+    <p class="credit">Technique studied on choparexpress.uz. The scene, story and code on this page are original.</p>
+  </div>
+</section>
+
+<script>
+(() => {
+  'use strict';
+  const THREE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+  const DURATION = 40;
+
+  const CHAPTERS = [
+    { start: 0,  title: 'The spring', text: 'Snowmelt gathers under the ridge. Someone folds a page from a notebook and lets it go.' },
+    { start: 6,  title: 'Pine forest', text: 'The stream picks up speed. The camera drops to water level and the trees close in.' },
+    { start: 12, title: 'Mill village', text: 'The wheel turns only as fast as you scroll. Stop here and the whole village stops with you.' },
+    { start: 18, title: 'Under the bridge', text: 'The afternoon runs out. One table drives the sky, the sunlight and the lamps on the bridge.' },
+    { start: 24, title: 'Night water', text: 'Windows light up along the banks. Scroll back and they switch off again in the same order.' },
+    { start: 32, title: 'The lighthouse', text: 'Dawn at the river mouth. The trail behind the boat shows the whole way it has come.' }
+  ];
+  const MOVES = [[1.5, 10.5, 0, .25], [12, 16.5, .25, .42], [18, 26, .42, .76], [27.5, 35.5, .76, .97]];
+  // time, distance, elevation, azimuth
+  const CAMERA = [[0,110,24,60],[3,48,22,40],[6,24,16,-70],[9.5,36,34,-45],[12.5,34,30,-12],[16,40,32,20],[18.5,36,24,30],[22.4,32,14,8],[25,38,30,40],[28.5,36,22,-100],[31.5,48,24,-70],[34.5,70,22,-30],[37.5,46,15,-18],[40,175,38,-55]];
+  // time, top, horizon, sun, sunPower, fill, elevation, azimuth, night
+  const SKY = [
+    [0,'#A8D8EA','#EAF4E8','#FFF2D9',.78,.62,55,140,0],
+    [14,'#B5D7E3','#F2E8D5','#FFE7C2',.76,.6,38,200,0],
+    [19,'#D98B73','#F7C89E','#FF9A5C',.7,.5,12,235,.1],
+    [22,'#2E2F57','#B8706C','#FF7A4A',.34,.38,4,250,.62],
+    [24.5,'#0B1230','#1C2C50','#A4B8F2',.36,.42,45,170,1],
+    [29,'#0B1230','#1C2C50','#A4B8F2',.36,.42,45,150,1],
+    [32,'#38315A','#E0907C','#FF8C5A',.42,.4,6,100,.55],
+    [35,'#A7C6DA','#F9D4B8','#FFC392',.72,.55,18,110,.05],
+    [40,'#A8D8EA','#EAF4E8','#FFF2D9',.78,.62,45,130,0]
+  ];
+  // time, minutes since midnight on day 1
+  const CLOCK = [[0,390],[14,840],[19,1120],[22,1210],[24.5,1290],[29,1560],[32,1770],[35,1860],[40,1950]];
+
+  const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+  const lerp = (a, b, u) => a + (b - a) * u;
+  const sstep = (a, b, x) => { const u = clamp((x - a) / (b - a)); return u * u * (3 - 2 * u); };
+  const catmull = (a, b, c, d, u) => .5 * (2 * b + (c - a) * u + (2 * a - 5 * b + 4 * c - d) * u * u + (3 * b - a - 3 * c + d) * u * u * u);
+  const boatPos = t => {
+    let s = 0;
+    for (const m of MOVES) {
+      if (t < m[0]) return s;
+      if (t <= m[1]) return lerp(m[2], m[3], sstep(m[0], m[1], t));
+      s = m[3];
+    }
+    return s;
+  };
+  const lookup = (table, t) => {
+    let i = 0;
+    while (i < table.length - 2 && t > table[i + 1][0]) i++;
+    const [a, av] = table[i], [b, bv] = table[i + 1];
+    return lerp(av, bv, clamp((t - a) / (b - a)));
+  };
+
+  function buildWorld(canvas, eco) {
+    const T = window.THREE;
+    let seed = 20261108;
+    const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let x = Math.imul(seed ^ seed >>> 15, 1 | seed); x = x + Math.imul(x ^ x >>> 7, 61 | x) ^ x; return ((x ^ x >>> 14) >>> 0) / 4294967296; };
+    const R = (a, b) => a + (b - a) * rnd();
+    const pick = a => a[Math.floor(rnd() * a.length)];
+    const hash = (i, j) => { const s = Math.sin(i * 127.1 + j * 311.7) * 43758.5453; return s - Math.floor(s); };
+    const vn = (x, z) => { const i = Math.floor(x), j = Math.floor(z), f = x - i, g = z - j, u = f * f * (3 - 2 * f), v = g * g * (3 - 2 * g); return lerp(lerp(hash(i, j), hash(i + 1, j), u), lerp(hash(i, j + 1), hash(i + 1, j + 1), u), v); };
+    const fbm = (x, z) => (vn(x, z) + .5 * vn(x * 2.1 + 9, z * 2.1 + 3) + .25 * vn(x * 4.3 + 1, z * 4.3 + 7)) / 1.75;
+
+    const renderer = new T.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, eco ? 1 : 1.5));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = T.PCFSoftShadowMap;
+    const scene = new T.Scene();
+    scene.fog = new T.Fog(0xffffff, 100, 500);
+    const camera = new T.PerspectiveCamera(32, 1, 1, 2600);
+
+    const std = (color, roughness = .9, extra) => new T.MeshStandardMaterial(Object.assign({ color, roughness, flatShading: true }, extra));
+    const add = (parent, geo, mat, x = 0, y = 0, z = 0, cast = true) => {
+      const m = new T.Mesh(geo, mat);
+      m.position.set(x, y, z); m.castShadow = cast; m.receiveShadow = true; parent.add(m);
+      return m;
+    };
+    const instanced = (geo, mat, items, cast = true) => {
+      const mesh = new T.InstancedMesh(geo, mat, Math.max(1, items.length));
+      const o = new T.Object3D(), c = new T.Color();
+      items.forEach((it, i) => {
+        o.position.set(it.x, it.y, it.z); o.rotation.set(it.rx || 0, it.ry || 0, 0); o.scale.set(it.sx, it.sy, it.sz); o.updateMatrix();
+        mesh.setMatrixAt(i, o.matrix);
+        if (it.color) mesh.setColorAt(i, c.set(it.color));
+      });
+      mesh.count = items.length; mesh.castShadow = cast; mesh.receiveShadow = true;
+      mesh.frustumCulled = false; // Instance positions are spread across the map
+      scene.add(mesh);
+      return mesh;
+    };
+    const canvasTex = (w, h, draw) => {
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      draw(c.getContext('2d'), w, h);
+      return new T.CanvasTexture(c);
+    };
+
+    // River: an arc-length curve that everything else is placed against.
+    const river = new T.CatmullRomCurve3([[-125,-30],[-88,-12],[-58,-26],[-26,-6],[6,-20],[36,6],[66,-8],[96,12],[126,0],[160,14],[205,6]].map(([x, z]) => new T.Vector3(x, 0, z)), false, 'catmullrom', .5);
+    river.arcLengthDivisions = 1200;
+    const SAMPLES = 160, samples = river.getSpacedPoints(SAMPLES);
+    const width = s => 3 + 5.5 * s;
+    const nearest = (x, z) => {
+      let best = Infinity, bi = 0;
+      for (let i = 0; i <= SAMPLES; i++) { const dx = samples[i].x - x, dz = samples[i].z - z, d = dx * dx + dz * dz; if (d < best) { best = d; bi = i; } }
+      return { d: Math.sqrt(best), s: bi / SAMPLES };
+    };
+    const at = (s, off = 0) => {
+      const u = clamp(s), p = river.getPointAt(u), tan = river.getTangentAt(u);
+      return { x: p.x - tan.z * off, z: p.z + tan.x * off, h: Math.atan2(tan.z, tan.x) };
+    };
+    const height = (x, z) => {
+      const { d, s } = nearest(x, z), w = width(s);
+      let y = lerp(-1.6, .55, sstep(w - .2, w + 2.6, d));
+      y += sstep(w + 1, w + 26, d) * (2 + 9 * fbm(x * .021 + 5, z * .021));
+      const ridge = 1 - Math.abs(2 * fbm(x * .017 + 2, z * .017 + 8) - 1);
+      y += sstep(-40, -160, x) * sstep(w + 4, w + 60, d) * (10 + 62 * ridge);
+      y += sstep(70, 210, d) * (14 + 34 * fbm(x * .012, z * .012 + 4));
+      return lerp(y, -4.5, sstep(128, 178, x));
+    };
+
+    // Terrain: flat-shaded grid with one color per triangle, like folded paper.
+    {
+      const cell = eco ? 4.4 : 3.2, X0 = -300, Z0 = -240, nx = Math.ceil(600 / cell), nz = Math.ceil(480 / cell);
+      const H = new Float32Array((nx + 1) * (nz + 1));
+      for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) H[j * (nx + 1) + i] = height(X0 + i * cell, Z0 + j * cell);
+      const pos = new Float32Array(nx * nz * 18), col = new Float32Array(nx * nz * 18);
+      const grass = ['#86AD5F', '#9ABB69', '#77A05A', '#8FB364'].map(c => new T.Color(c));
+      const sand = new T.Color('#DCCB9F'), rock = new T.Color('#8D8C88'), snow = new T.Color('#F4F6F6'), tmp = new T.Color();
+      let k = 0;
+      const tri = (a, b, c) => {
+        const cx = (a[0] + b[0] + c[0]) / 3, cy = (a[1] + b[1] + c[1]) / 3, cz = (a[2] + b[2] + c[2]) / 3;
+        const near = nearest(cx, cz);
+        if (cy < 1 && (near.d < width(near.s) + 3.6 || cx > 116)) tmp.copy(sand);
+        else if (cy > 36) tmp.copy(snow);
+        else if (cy > 21) tmp.copy(rock);
+        else tmp.copy(grass[Math.floor(fbm(cx * .06, cz * .06) * 7) % 4]);
+        tmp.multiplyScalar(R(.95, 1.05));
+        for (const p of [a, b, c]) { pos[k] = p[0]; pos[k + 1] = p[1]; pos[k + 2] = p[2]; col[k] = tmp.r; col[k + 1] = tmp.g; col[k + 2] = tmp.b; k += 3; }
+      };
+      for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+        const P = (ii, jj) => [X0 + ii * cell, H[jj * (nx + 1) + ii], Z0 + jj * cell];
+        const a = P(i, j), b = P(i + 1, j), c = P(i, j + 1), d = P(i + 1, j + 1);
+        tri(a, c, b); tri(b, c, d);
+      }
+      const g = new T.BufferGeometry();
+      g.setAttribute('position', new T.BufferAttribute(pos, 3));
+      g.setAttribute('color', new T.BufferAttribute(col, 3));
+      g.computeVertexNormals();
+      const m = new T.Mesh(g, new T.MeshStandardMaterial({ vertexColors: true, roughness: 1, flatShading: true }));
+      m.receiveShadow = true; scene.add(m);
+    }
+
+    // Water
+    const rippleTex = canvasTex(256, 256, (c, w, h) => {
+      c.fillStyle = '#2C9FB0'; c.fillRect(0, 0, w, h);
+      for (let i = 0; i < 90; i++) { c.fillStyle = i % 3 ? 'rgba(255,255,255,.1)' : 'rgba(14,92,112,.22)'; c.fillRect(R(0, w), R(0, h), R(14, 42), 2); }
+    });
+    rippleTex.wrapS = rippleTex.wrapT = T.RepeatWrapping; rippleTex.repeat.set(70, 70);
+    const water = new T.Mesh(new T.PlaneGeometry(3000, 3000), new T.MeshStandardMaterial({ map: rippleTex, roughness: .88, metalness: 0 }));
+    water.rotation.x = -Math.PI / 2; water.receiveShadow = true; scene.add(water);
+
+    // Trail: a ribbon revealed with setDrawRange as the boat advances.
+    const TRAIL = 500;
+    const trail = (() => {
+      const p = [], idx = [];
+      for (let i = 0; i <= TRAIL; i++) {
+        const u = i / TRAIL, a = at(u, .3), b = at(u, -.3);
+        p.push(a.x, .16, a.z, b.x, .16, b.z);
+        if (i < TRAIL) { const n = i * 2; idx.push(n, n + 1, n + 2, n + 1, n + 3, n + 2); }
+      }
+      const g = new T.BufferGeometry();
+      g.setAttribute('position', new T.Float32BufferAttribute(p, 3)); g.setIndex(idx);
+      const m = new T.Mesh(g, new T.MeshBasicMaterial({ color: '#F4AE27', side: T.DoubleSide, fog: false }));
+      m.frustumCulled = false; scene.add(m);
+      return m;
+    })();
+
+    // Boat: hand-placed triangles for a folded paper hull.
+    const boat = new T.Group(); boat.rotation.order = 'YXZ'; boat.scale.setScalar(1.7); scene.add(boat);
+    {
+      const B = [1.9,.95,0], S = [-1.9,.95,0], KF = [.9,0,0], KB = [-.9,0,0], L = [0,.62,.72], Rt = [0,.62,-.72], A = [0,1.8,0], F = [.85,.62,0], Bk = [-.85,.62,0];
+      const tris = [B,KF,L, KF,KB,L, KB,S,L, B,Rt,KF, KF,Rt,KB, KB,Rt,S, F,A,L, Bk,L,A, F,Rt,A, Bk,A,Rt, L,F,B, L,S,Bk, Rt,B,F, Rt,Bk,S];
+      const g = new T.BufferGeometry();
+      g.setAttribute('position', new T.Float32BufferAttribute(tris.flat(), 3)); g.computeVertexNormals();
+      add(boat, g, new T.MeshStandardMaterial({ color: '#FFFEF8', emissive: '#FFFEF8', emissiveIntensity: .24, roughness: .85, side: T.DoubleSide, flatShading: true }));
+    }
+    const glowTex = canvasTex(64, 64, (c, w, h) => {
+      const g = c.createRadialGradient(32, 32, 0, 32, 32, 32);
+      g.addColorStop(0, 'rgba(255,235,190,1)'); g.addColorStop(.35, 'rgba(255,195,110,.5)'); g.addColorStop(1, 'rgba(255,170,90,0)');
+      c.fillStyle = g; c.fillRect(0, 0, w, h);
+    });
+    const glowMat = new T.SpriteMaterial({ map: glowTex, color: '#FFC977', transparent: true, blending: T.AdditiveBlending, depthWrite: false, opacity: 0 });
+    const boatGlowMat = glowMat.clone();
+    const boatGlow = new T.Sprite(boatGlowMat); boatGlow.scale.set(4, 4, 1); boatGlow.position.y = 1.2; boat.add(boatGlow);
+
+    const blockers = [];
+    const blocked = (x, z, r) => blockers.some(b => Math.hypot(b.x - x, b.z - z) < b.r + r);
+
+    // Village, built with instancing so 40 houses cost three draw calls.
+    const windowMat = std('#3D4A63', .6, { emissive: '#FFC76B', emissiveIntensity: 0 });
+    {
+      const walls = [], roofs = [], wins = [], Y = new T.Vector3(0, 1, 0);
+      for (let s = .35; s < .82; s += .0145) for (const side of [-1, 1]) {
+        // The bridge shot looks in from the +z bank, so that bank stays clear of houses.
+        if (rnd() < .22 || Math.abs(s - .62) < .025 || Math.abs(s - .42) < .022 || (side > 0 && s > .5 && s < .69)) continue;
+        const a = at(s, side * (width(s) + R(6, 15))), y = height(a.x, a.z);
+        if (y > 9 || blocked(a.x, a.z, 4)) continue;
+        const w = R(3.8, 5.6), d = R(3.4, 4.8), hgt = R(2.6, 3.8);
+        blockers.push({ x: a.x, z: a.z, r: 4.2 });
+        walls.push({ x: a.x, y: y + hgt / 2 - .2, z: a.z, ry: -a.h, sx: w, sy: hgt + .4, sz: d, color: pick(['#EADFC8', '#D6E1DE', '#E4C9B0', '#C9D6C0', '#F0E9DC']) });
+        roofs.push({ x: a.x, y: y + hgt, z: a.z, ry: -a.h + Math.PI / 4, sx: Math.hypot(w, d) * .56, sy: R(1.7, 2.4), sz: Math.hypot(w, d) * .56, color: pick(['#B4543A', '#56687F', '#3F6F6A', '#8A4C3C']) });
+        for (const lx of [-w * .24, w * .24]) {
+          const p = new T.Vector3(lx, 0, -side * (d / 2 + .04)).applyAxisAngle(Y, -a.h);
+          wins.push({ x: a.x + p.x, y: y + hgt * .58, z: a.z + p.z, ry: -a.h, sx: .95, sy: 1.1, sz: .1 });
+        }
+      }
+      const box = new T.BoxGeometry(1, 1, 1), cone = new T.ConeGeometry(1, 1, 4); cone.translate(0, .5, 0);
+      instanced(box, std('#ffffff'), walls);
+      instanced(cone, std('#ffffff'), roofs);
+      instanced(box, windowMat, wins, false);
+    }
+
+    // Mill: the wheel rotation is read straight from t.
+    const wheel = new T.Group();
+    {
+      const a = at(.42, width(.42) + .6), y = .2;
+      const mill = new T.Group(); mill.position.set(a.x, y, a.z); mill.rotation.y = -a.h; scene.add(mill);
+      blockers.push({ x: a.x, z: a.z, r: 11 });
+      add(mill, new T.BoxGeometry(7, 5.4, 5), std('#E9DDC4'), 0, 2.7, 5.4);
+      const roof = add(mill, new T.ConeGeometry(5.8, 3, 4), std('#7F3F31'), 0, 6.8, 5.4); roof.rotation.y = Math.PI / 4;
+      wheel.position.set(0, 2.3, .7); mill.add(wheel);
+      const wood = std('#8B6B4A');
+      const hub = add(wheel, new T.CylinderGeometry(.5, .5, 1.1, 8), wood); hub.rotation.x = Math.PI / 2;
+      for (let i = 0; i < 8; i++) {
+        const ang = i / 8 * Math.PI * 2, spoke = add(wheel, new T.BoxGeometry(5.6, .2, .3), wood); spoke.rotation.z = ang;
+        const p = add(wheel, new T.BoxGeometry(.2, 1.15, 1.25), wood, Math.cos(ang) * 2.9, Math.sin(ang) * 2.9, 0); p.rotation.z = ang;
+      }
+    }
+
+    // Bridge and lamps
+    const lampMat = new T.MeshStandardMaterial({ color: '#FFF2D8', emissive: '#FFC76B', emissiveIntensity: 0 });
+    {
+      const a = at(.62), w = width(.62), stone = std('#C9C2B4'), span = w + 7;
+      const br = new T.Group(); br.position.set(a.x, 0, a.z); br.rotation.y = -a.h; scene.add(br);
+      blockers.push({ x: a.x, z: a.z, r: span + 6 });
+      const view = at(.62, 32); blockers.push({ x: view.x, z: view.z, r: 26 });
+      add(br, new T.BoxGeometry(4, .55, span * 2 + 6), stone, 0, 6.1, 0);
+      for (const sx of [-1.75, 1.75]) add(br, new T.BoxGeometry(.3, .85, span * 2 + 6), stone, sx, 6.8, 0);
+      for (const side of [-1, 1]) {
+        add(br, new T.BoxGeometry(4.6, 9, 3), stone, 0, 2, side * (w + 1.6));
+        add(br, new T.BoxGeometry(4.6, 8, 4), stone, 0, 2.5, side * (span + 2));
+        for (const off of [0, 7]) {
+          add(br, new T.CylinderGeometry(.08, .1, 2.6, 6), std('#39414E'), 1.75, 8.1, side * (off + 2));
+          add(br, new T.SphereGeometry(.28, 8, 6), lampMat, 1.75, 9.5, side * (off + 2), false);
+          const g = new T.Sprite(glowMat); g.scale.set(5.5, 5.5, 1); g.position.set(1.75, 9.5, side * (off + 2)); br.add(g);
+        }
+      }
+    }
+    for (let s = .37; s < .82; s += .04) {
+      if (Math.abs(s - .62) < .03) continue;
+      const side = Math.round(s * 100) % 2 ? 1 : -1, a = at(s, side * (width(s) + 3.2)), y = Math.max(.4, height(a.x, a.z));
+      add(scene, new T.CylinderGeometry(.07, .09, 3.8, 6), std('#39414E'), a.x, y + 1.9, a.z, false);
+      add(scene, new T.SphereGeometry(.26, 8, 6), lampMat, a.x, y + 3.9, a.z, false);
+      const g = new T.Sprite(glowMat); g.scale.set(5, 5, 1); g.position.set(a.x, y + 3.9, a.z); scene.add(g);
+    }
+
+    // Lighthouse on its own rock
+    const end = at(.97);
+    const lh = new T.Group(); lh.position.set(end.x + 8, 0, end.z - 30); scene.add(lh);
+    const beam = new T.Group();
+    const beamMat = new T.MeshBasicMaterial({ color: '#FFE9B8', transparent: true, opacity: 0, blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide, fog: false });
+    const lhLamp = new T.MeshStandardMaterial({ color: '#FFF7E0', emissive: '#FFD07A', emissiveIntensity: .2 });
+    {
+      add(lh, new T.CylinderGeometry(13, 19, 6, 9), std('#77736C'), 0, 0, 0);
+      const white = std('#F3F0E8'), coral = std('#D2553F');
+      for (let i = 0; i < 4; i++) add(lh, new T.CylinderGeometry(2.45 - i * .32, 2.8 - i * .32, 4, 12), i % 2 ? white : coral, 0, 5 + i * 4, 0);
+      add(lh, new T.CylinderGeometry(1.5, 1.5, 2, 10), lhLamp, 0, 20, 0, false);
+      const cap = add(lh, new T.ConeGeometry(1.9, 1.7, 10), coral, 0, 21.8, 0); cap.castShadow = false;
+      beam.position.y = 20; lh.add(beam);
+      const cg = new T.ConeGeometry(4, 40, 16, 1, true); cg.translate(0, -20, 0); cg.rotateZ(Math.PI / 2);
+      beam.add(new T.Mesh(cg, beamMat));
+      const back = new T.Mesh(cg, beamMat); back.rotation.y = Math.PI; beam.add(back);
+    }
+
+    // Trees and rocks
+    {
+      const pines = [], rounds = [], trunks = [], rocks = [], max = eco ? 340 : 720;
+      for (let n = 0; n < max * 6 && pines.length + rounds.length < max; n++) {
+        const x = R(-205, 122), z = R(-175, 175), q = nearest(x, z);
+        if (q.d < width(q.s) + 8 || (q.s > .36 && rnd() > .3) || blocked(x, z, 2)) continue;
+        const y = height(x, z);
+        if (y < .6 || y > 26) continue;
+        if (q.s > .32 && rnd() < .55) {
+          const r = R(1.6, 2.5);
+          trunks.push({ x, y: y + 1, z, sx: .3, sy: 2, sz: .3 });
+          rounds.push({ x, y: y + 2.2 + r * .6, z, rx: R(0, 3), ry: R(0, 6), sx: r, sy: r * .95, sz: r, color: pick(['#7FAE5B', '#93BB63', '#6E9F54']) });
+        } else {
+          const r = R(1.5, 2.6);
+          pines.push({ x, y: y - .1, z, ry: R(0, 6), sx: r, sy: R(4.5, 8), sz: r, color: pick(['#3F7A57', '#2F6B52', '#4C8A5C']) });
+        }
+      }
+      for (let n = 0; n < 60; n++) {
+        const s = n < 22 ? R(0, .05) : R(0, .3), a = at(s, (rnd() < .5 ? -1 : 1) * (width(s) + R(.2, 2.4))), r = R(.6, 1.7);
+        rocks.push({ x: a.x, y: .15, z: a.z, rx: R(0, 3), ry: R(0, 6), sx: r, sy: r * .75, sz: r, color: pick(['#9A9890', '#85857F', '#ACA99F']) });
+      }
+      const cone = new T.ConeGeometry(1, 1, 6); cone.translate(0, .5, 0);
+      const mat = () => std('#ffffff');
+      instanced(cone, mat(), pines);
+      instanced(new T.IcosahedronGeometry(1, 0), mat(), rounds);
+      instanced(new T.CylinderGeometry(1, 1, 1, 5), std('#7A5F45'), trunks);
+      instanced(new T.DodecahedronGeometry(1, 0), mat(), rocks);
+    }
+
+    const anims = [];
+
+    // Sailboats bob with t rather than with a clock.
+    {
+      const sail = new T.BufferGeometry();
+      sail.setAttribute('position', new T.Float32BufferAttribute([0,.5,0, 0,6,0, 3,.5,0, 0,.5,0, 0,5,0, -2,.5,0], 3)); sail.computeVertexNormals();
+      const sm = [std('#F6F2E7', .9, { side: T.DoubleSide }), std('#E7B04D', .9, { side: T.DoubleSide }), std('#D2553F', .9, { side: T.DoubleSide })], hull = std('#3B5068');
+      [[176,44],[194,-52],[220,34],[160,58],[238,-20],[214,70]].forEach(([x, z], i) => {
+        const g = new T.Group(); g.position.set(x, 0, z); g.rotation.y = i * 1.2; scene.add(g);
+        add(g, new T.BoxGeometry(4.6, 1, 1.7), hull, 0, .4, 0);
+        add(g, sail, sm[i % 3]);
+        anims.push(t => { g.position.y = Math.sin(t * 2.2 + i) * .14; g.rotation.z = Math.sin(t * 1.7 + i * 2) * .05; });
+      });
+    }
+
+    // Birds circle as a function of t and go home at night.
+    {
+      const wingG = new T.BufferGeometry();
+      wingG.setAttribute('position', new T.Float32BufferAttribute([.28,0,0, -.22,0,0, -.1,0,1.1], 3)); wingG.computeVertexNormals();
+      const wm = new T.MeshBasicMaterial({ color: '#353B45', side: T.DoubleSide });
+      const birds = [];
+      [.1, .3, .48, .9].forEach(s => {
+        const c = at(s);
+        for (let i = 0; i < 6; i++) {
+          const g = new T.Group(); g.scale.setScalar(1.25); scene.add(g);
+          const l = new T.Mesh(wingG, wm), r = new T.Mesh(wingG, wm); r.scale.z = -1; g.add(l, r);
+          birds.push({ g, l, r, cx: c.x, cz: c.z, y: R(19, 27), rad: R(14, 30), a: R(0, 6), ph: R(0, 6) });
+        }
+      });
+      anims.push((t, night) => {
+        for (const b of birds) {
+          b.g.visible = night < .5;
+          if (!b.g.visible) continue;
+          const a = t * .34 + b.a;
+          b.g.position.set(b.cx + Math.cos(a) * b.rad, b.y + Math.sin(t * 1.3 + b.ph) * .7, b.cz + Math.sin(a) * b.rad);
+          b.g.rotation.y = -(a + Math.PI / 2);
+          const f = Math.sin(t * 9 + b.ph) * .6;
+          b.l.rotation.x = -f; b.r.rotation.x = f;
+        }
+      });
+    }
+
+    // Clouds
+    const clouds = new T.Group(); scene.add(clouds);
+    {
+      const items = [];
+      for (let n = 0; n < 16; n++) {
+        const x = R(-260, 290), z = (rnd() < .5 ? -1 : 1) * R(75, 210), y = R(58, 88);
+        for (let i = 0; i < 5; i++) items.push({ x: x + R(-14, 14), y: y + R(-2, 3), z: z + R(-8, 8), rx: R(0, 3), ry: R(0, 3), sx: R(7, 12), sy: R(3, 5.5), sz: R(6, 10) });
+      }
+      const m = instanced(new T.IcosahedronGeometry(1, 0), std('#FFFFFF', 1), items, false);
+      scene.remove(m); clouds.add(m); m.receiveShadow = false;
+    }
+
+    // Km posts use sprites so they always face the camera.
+    for (let km = 0; km <= 38; km += 8) {
+      const s = km / 38 * .97, a = at(s, width(s) + 2), y = Math.max(.5, height(a.x, a.z));
+      const tex = canvasTex(128, 64, (c, w, h) => {
+        c.fillStyle = '#FBFAF4'; c.fillRect(0, 0, w, h); c.strokeStyle = '#16233F'; c.lineWidth = 5; c.strokeRect(3, 3, w - 6, h - 6);
+        c.fillStyle = '#16233F'; c.font = '700 30px Figtree, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(km + ' km', w / 2, h / 2 + 2);
+      });
+      add(scene, new T.CylinderGeometry(.08, .08, 2.4, 6), std('#6B5A47'), a.x, y + 1.2, a.z, false);
+      const sp = new T.Sprite(new T.SpriteMaterial({ map: tex })); sp.position.set(a.x, y + 3, a.z); sp.scale.set(3.2, 1.6, 1); scene.add(sp);
+    }
+
+    // Sky, stars, moon, lights
+    const skyMat = new T.ShaderMaterial({
+      side: T.BackSide, depthWrite: false, fog: false,
+      uniforms: { top: { value: new T.Color() }, hor: { value: new T.Color() } },
+      vertexShader: 'varying vec3 v;void main(){v=normalize(position);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
+      fragmentShader: 'uniform vec3 top;uniform vec3 hor;varying vec3 v;void main(){float h=clamp(v.y*1.7+.02,0.,1.);gl_FragColor=vec4(mix(hor,top,pow(h,.7)),1.);}'
+    });
+    const sky = new T.Mesh(new T.SphereGeometry(1800, 24, 16), skyMat); scene.add(sky);
+    const starMat = new T.PointsMaterial({ color: '#E6ECFF', size: 1.7, sizeAttenuation: false, transparent: true, opacity: 0, depthWrite: false, fog: false });
+    const stars = (() => {
+      const p = [];
+      for (let i = 0; i < 700; i++) {
+        const a = R(0, Math.PI * 2), y = R(.04, 1), r = Math.sqrt(1 - y * y);
+        p.push(Math.cos(a) * r * 1600, y * 1600, Math.sin(a) * r * 1600);
+      }
+      const g = new T.BufferGeometry(); g.setAttribute('position', new T.Float32BufferAttribute(p, 3));
+      const pts = new T.Points(g, starMat); pts.frustumCulled = false; scene.add(pts);
+      return pts;
+    })();
+    const moonMat = new T.MeshBasicMaterial({ color: '#F4EFD8', transparent: true, opacity: 0, fog: false, depthWrite: false });
+    const moon = new T.Mesh(new T.SphereGeometry(30, 20, 14), moonMat); scene.add(moon);
+
+    const hemi = new T.HemisphereLight('#ffffff', '#8A7B62', .6); scene.add(hemi);
+    const sun = new T.DirectionalLight('#ffffff', .8);
+    sun.castShadow = true; sun.shadow.mapSize.set(eco ? 1024 : 2048, eco ? 1024 : 2048);
+    sun.shadow.camera.near = 10; sun.shadow.camera.far = 480; sun.shadow.bias = -.0006; sun.shadow.normalBias = .5;
+    scene.add(sun, sun.target);
+
+    // Reusable colors for the sky table
+    const skyRows = SKY.map(r => ({ t: r[0], top: new T.Color(r[1]), hor: new T.Color(r[2]), sun: new T.Color(r[3]), si: r[4], hi: r[5], el: r[6], az: r[7], n: r[8] }));
+    const skyAt = t => {
+      let i = 0;
+      while (i < skyRows.length - 2 && t > skyRows[i + 1].t) i++;
+      const a = skyRows[i], b = skyRows[i + 1], u = sstep(a.t, b.t, t);
+      skyMat.uniforms.top.value.copy(a.top).lerp(b.top, u);
+      skyMat.uniforms.hor.value.copy(a.hor).lerp(b.hor, u);
+      sun.color.copy(a.sun).lerp(b.sun, u);
+      return { si: lerp(a.si, b.si, u), hi: lerp(a.hi, b.hi, u), el: lerp(a.el, b.el, u), az: lerp(a.az, b.az, u), n: lerp(a.n, b.n, u) };
+    };
+    const cameraAt = t => {
+      let i = 0;
+      while (i < CAMERA.length - 2 && t > CAMERA[i + 1][0]) i++;
+      const a = CAMERA[Math.max(0, i - 1)], b = CAMERA[i], c = CAMERA[i + 1], d = CAMERA[Math.min(CAMERA.length - 1, i + 2)], u = clamp((t - b[0]) / (c[0] - b[0]));
+      const f = n => catmull(a[n], b[n], c[n], d[n], u);
+      return { dist: f(1), el: f(2), az: f(3), i };
+    };
+
+    const rad = Math.PI / 180, tgt = new T.Vector3();
+    let shadowSize = 0;
+
+    function render(t) {
+      const s = skyAt(t), night = s.n;
+      scene.fog.color.copy(skyMat.uniforms.hor.value);
+      hemi.color.copy(skyMat.uniforms.hor.value).lerp(skyMat.uniforms.top.value, .35);
+      hemi.intensity = s.hi; sun.intensity = s.si;
+      windowMat.emissiveIntensity = night * 1.7;
+      lampMat.emissiveIntensity = night * 2.2;
+      lhLamp.emissiveIntensity = .2 + night * 3;
+      glowMat.opacity = night; boatGlowMat.opacity = night * .55;
+      starMat.opacity = night; moonMat.opacity = night;
+      moon.visible = night > .01; beam.rotation.y = t * 1.15;
+
+      const pos = boatPos(t), p = at(pos);
+      boat.position.set(p.x, Math.sin(t * 3.2) * .06, p.z);
+      boat.rotation.set(Math.sin(t * 2.3) * .05, -p.h, Math.sin(t * 2.9) * .025);
+      trail.geometry.setDrawRange(0, Math.floor(pos * TRAIL) * 6);
+      rippleTex.offset.x = t * .05;
+      wheel.rotation.z = -t * 1.3;
+      clouds.position.x = t * 1.1;
+      for (const fn of anims) fn(t, night);
+
+      const c = cameraAt(t), bias = sstep(33, 37.5, t) * .4;
+      tgt.set(lerp(p.x, lh.position.x, bias), 1.2 + bias * 5, lerp(p.z, lh.position.z, bias));
+      const cx = tgt.x + c.dist * Math.cos(c.el * rad) * Math.sin(c.az * rad);
+      const cz = tgt.z + c.dist * Math.cos(c.el * rad) * Math.cos(c.az * rad);
+      const cy = Math.max(tgt.y + c.dist * Math.sin(c.el * rad), Math.max(height(cx, cz), 0) + 2.2);
+      camera.position.set(cx, cy, cz);
+      camera.lookAt(tgt);
+      // Fade the beam out when the camera gets close enough to sit inside its cone.
+      beamMat.opacity = night * .3 * sstep(46, 62, camera.position.distanceTo(lh.position));
+      beam.visible = beamMat.opacity > .002;
+
+      scene.fog.near = c.dist * .9 + 60; scene.fog.far = c.dist * 3 + 300;
+      const size = Math.round(clamp(c.dist * .75, 28, 95));
+      if (size !== shadowSize) {
+        shadowSize = size;
+        const sc = sun.shadow.camera; sc.left = sc.bottom = -size; sc.right = sc.top = size; sc.updateProjectionMatrix();
+      }
+      const el = s.el * rad, az = s.az * rad;
+      sun.position.set(tgt.x + Math.cos(el) * Math.sin(az) * 200, Math.sin(el) * 200, tgt.z + Math.cos(el) * Math.cos(az) * 200);
+      sun.target.position.set(tgt.x, 0, tgt.z);
+
+      sky.position.copy(camera.position); stars.position.copy(camera.position);
+      moon.position.set(camera.position.x - 620, camera.position.y + 620, camera.position.z - 540);
+      renderer.render(scene, camera);
+      return { pos, night, key: c.i };
+    }
+
+    function setSize(w, h) {
+      renderer.setSize(w, h, false);
+      camera.aspect = w / h;
+      camera.fov = camera.aspect < 1 ? 44 : 32;
+      camera.setViewOffset(w, h, 0, Math.round(h * (w < 700 ? .1 : .05)), w, h);
+    }
+
+    function dispose() {
+      scene.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+      renderer.dispose();
+    }
+    return { render, setSize, dispose };
+  }
+
+  // Page logic: everything below knows nothing about 3D except render(t).
+  const $ = id => document.getElementById(id);
+  const story = $('story'), stage = $('stage'), canvas = $('scene'), intro = $('intro'), hud = $('hud'), cue = $('cue'), force = $('force');
+  const fields = { clock: $('clock'), day: $('day'), km: $('km'), n: $('cap-n'), title: $('cap-title'), text: $('cap-text'), progress: $('g-progress'), target: $('g-target'), time: $('g-time'), key: $('g-key'), night: $('g-night'), raw: $('lag-raw'), eased: $('lag-eased') };
+
+  $('static-chapters').innerHTML = CHAPTERS.map(c => `<li><h3>${c.title}</h3><p>${c.text}</p></li>`).join('');
+  fields.text.textContent = CHAPTERS[0].text;
+
+  const rail = $('rail');
+  const railButtons = CHAPTERS.map((c, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('aria-label', `Chapter ${i + 1}: ${c.title}`);
+    b.innerHTML = `<span class="rail__bar"><span></span></span><span class="rail__label">${c.title}</span><span class="rail__num" aria-hidden="true">${i + 1}</span>`;
+    b.addEventListener('click', () => goToChapter(i));
+    rail.appendChild(b);
+    return b;
+  });
+  const railBars = railButtons.map(b => b.querySelector('.rail__bar span'));
+
+  if (window.matchMedia('(min-width: 900px)').matches) $('hood').open = true;
+
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+  let world = null, starting = false, ready = false, visible = false, raf = 0, last = 0, time = 0, shownTime = NaN, dirty = true, chapter = -1, lastInfo = { pos: 0, night: 0, key: 0 };
+
+  const progress = () => {
+    const r = story.getBoundingClientRect();
+    return clamp(-r.top / Math.max(1, r.height - stage.clientHeight));
+  };
+  const chapterAt = t => CHAPTERS.reduce((best, c, i) => (t >= c.start ? i : best), 0);
+
+  function updateHud(t, target, prog) {
+    const introAmt = clamp(1 - t / 1.2);
+    intro.style.opacity = introAmt.toFixed(3);
+    intro.style.visibility = introAmt <= 0 ? 'hidden' : 'visible';
+    const hudAmt = clamp((t - .8) / .5);
+    hud.style.opacity = hudAmt.toFixed(3);
+    hud.style.visibility = hudAmt <= 0 ? 'hidden' : 'visible';
+
+    const minutes = Math.round(lookup(CLOCK, t)), m = minutes % 1440;
+    fields.clock.textContent = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    fields.day.textContent = minutes >= 1440 ? 'Day 2' : 'Day 1';
+    fields.km.textContent = `${(lastInfo.pos / .97 * 38).toFixed(1)} km`;
+
+    const ch = chapterAt(t);
+    if (ch !== chapter) {
+      chapter = ch;
+      fields.n.textContent = `${ch + 1} of ${CHAPTERS.length}`;
+      fields.title.textContent = CHAPTERS[ch].title;
+      fields.text.textContent = CHAPTERS[ch].text;
+      railButtons.forEach((b, i) => (i === ch ? b.setAttribute('aria-current', 'step') : b.removeAttribute('aria-current')));
+    }
+    CHAPTERS.forEach((c, i) => {
+      const next = i + 1 < CHAPTERS.length ? CHAPTERS[i + 1].start : DURATION;
+      railBars[i].style.transform = `scaleX(${clamp((t - c.start) / (next - c.start)).toFixed(3)})`;
+    });
+
+    fields.progress.textContent = `${(prog * 100).toFixed(1)}%`;
+    fields.target.textContent = target.toFixed(2);
+    fields.time.textContent = t.toFixed(2);
+    fields.key.textContent = `${lastInfo.key} → ${lastInfo.key + 1}`;
+    fields.night.textContent = lastInfo.night.toFixed(2);
+    fields.raw.style.left = `${(target / DURATION * 100).toFixed(2)}%`;
+    fields.eased.style.left = `${(t / DURATION * 100).toFixed(2)}%`;
+  }
+
+  function frame(now) {
+    raf = 0;
+    if (!ready || !visible || document.hidden) return;
+    const dt = Math.min(.25, (now - (last || now)) / 1000);
+    last = now;
+    const prog = progress(), target = prog * DURATION;
+    time += (target - time) * (1 - Math.exp(-dt * 5));
+    if (Math.abs(target - time) < .002) time = target;
+    // The frame depends only on t, so an unchanged t means nothing to redraw.
+    if (dirty || time !== shownTime) {
+      try { lastInfo = world.render(time); } catch (err) { fail(); return; }
+      shownTime = time; dirty = false;
+    }
+    updateHud(time, target, prog);
+    raf = requestAnimationFrame(frame);
+  }
+  function wake() {
+    if (ready && visible && !document.hidden && !raf) { last = 0; raf = requestAnimationFrame(frame); }
+  }
+  function resize() {
+    if (!world) return;
+    world.setSize(stage.clientWidth, stage.clientHeight);
+    dirty = true; wake();
+  }
+  function goToChapter(i) {
+    const r = story.getBoundingClientRect();
+    const top = window.scrollY + r.top + (CHAPTERS[i].start + .9) / DURATION * (r.height - stage.clientHeight);
+    window.scrollTo({ top, behavior: reduced.matches ? 'auto' : 'smooth' });
+  }
+  function fail() {
+    cancelAnimationFrame(raf); raf = 0; ready = false;
+    if (world) { try { world.dispose(); } catch (e) {} world = null; }
+    story.classList.remove('is-ready');
+    intro.style.opacity = ''; intro.style.visibility = '';
+    cue.textContent = 'This device could not start the 3D scene, so the chapters are listed below.';
+  }
+  function loadThree() {
+    if (window.THREE) return Promise.resolve();
+    return new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.src = THREE_URL; s.onload = res; s.onerror = () => rej(new Error('Three.js did not load'));
+      document.head.appendChild(s);
+    });
+  }
+  async function start() {
+    if (starting || world) return;
+    starting = true;
+    force.hidden = true;
+    cue.textContent = 'Loading the 3D scene…';
+    try {
+      await loadThree();
+      const eco = window.matchMedia('(max-width: 899px)').matches || (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4);
+      world = buildWorld(canvas, !!eco);
+      const before = story.getBoundingClientRect().bottom;
+      story.classList.add('is-ready');
+      // If the reader is already past the story, keep what they are reading in place.
+      if (before <= 0) window.scrollBy({ top: story.getBoundingClientRect().bottom - before, behavior: 'instant' });
+      world.setSize(stage.clientWidth, stage.clientHeight);
+      time = progress() * DURATION;
+      ready = true; dirty = true;
+      cue.textContent = 'Scroll down to set it off ↓';
+      lastInfo = world.render(time); shownTime = time; dirty = false;
+      updateHud(time, time, progress());
+      wake();
+    } catch (err) {
+      fail();
+    } finally {
+      starting = false;
+    }
+  }
+
+  canvas.addEventListener('webglcontextlost', e => { e.preventDefault(); fail(); });
+  window.addEventListener('resize', resize);
+  document.addEventListener('visibilitychange', wake);
+  force.addEventListener('click', start);
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(([e]) => { visible = e.isIntersecting; wake(); }).observe(story);
+  } else {
+    visible = true;
+  }
+
+  const boot = () => {
+    if (reduced.matches) {
+      cue.textContent = 'Your device asks for reduced motion, so the chapters are listed below.';
+      force.hidden = false;
+      return;
+    }
+    start();
+  };
+  const whenIdle = () => (window.requestIdleCallback ? requestIdleCallback(boot, { timeout: 1500 }) : setTimeout(boot, 200));
+  if (document.readyState === 'complete') whenIdle(); else window.addEventListener('load', whenIdle, { once: true });
+})();
+</script>
+</body>
+</html>
